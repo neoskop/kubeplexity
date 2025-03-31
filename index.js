@@ -1,6 +1,9 @@
 import express from "express";
 import axios from "axios";
 import dns from "dns";
+import axiosRetry from "axios-retry";
+
+axiosRetry(axios, { retries: 3, retryDelay: axiosRetry.exponentialDelay });
 
 const app = express();
 const port = 8080;
@@ -24,20 +27,29 @@ app.all("/*", (req, res) => {
     { family: 4, all: true },
     async (err, addresses) => {
       if (err) {
-        console.error(err);
+        console.error(`Resolving of ${targetHostname} failed: ${err}`);
+        return;
       }
 
       await Promise.all(
-        addresses.map((address) => {
-          console.log(
-            `Forwarding request to http://${address.address}:${targetPort}${req.url}`
-          );
-          return axios.request({
-            method: req.method,
-            url: `http://${address.address}:${targetPort}${req.url}`,
-            headers: req.headers,
-            data: req.body,
-          });
+        addresses.map(async (address) => {
+          const url = `http://${address.address}:${targetPort}${req.url}`;
+          console.log(`Forwarding request to ${url}`);
+          try {
+            await axios.request({
+              method: req.method,
+              url,
+              headers: req.headers,
+              data: req.body,
+              onRetry: (retryCount) => {
+                console.log(
+                  `Retrying request to ${url} (attempt ${retryCount})`
+                );
+              },
+            });
+          } catch (error) {
+            console.error(`Error forwarding request to ${url}: ${error}`);
+          }
         })
       );
     }
