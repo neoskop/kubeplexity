@@ -1,4 +1,4 @@
-FROM node:24.12.0-bookworm AS base
+FROM node:24.13.0-bookworm AS base
 USER node
 WORKDIR /home/node/app
 COPY package*.json ./
