@@ -127,8 +127,25 @@ const readRequestBody = async (req) => {
   return Buffer.concat(chunks);
 };
 
+const HOP_BY_HOP_HEADERS = [
+  "connection",
+  "keep-alive",
+  "proxy-authenticate",
+  "proxy-authorization",
+  "te",
+  "trailer",
+  "transfer-encoding",
+  "upgrade",
+];
+
 const prepareForwardHeaders = (headers, body) => {
   const forwardHeaders = { ...headers };
+
+  for (const header of HOP_BY_HOP_HEADERS) {
+    delete forwardHeaders[header];
+  }
+
+  delete forwardHeaders["host"];
 
   if (body === undefined || body === null) {
     delete forwardHeaders["content-length"];
