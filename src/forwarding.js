@@ -61,12 +61,31 @@ export const readRequestBody = async (req) => {
   const method = req.method?.toUpperCase?.() ?? "";
   if (method === "GET" || method === "HEAD") return undefined;
 
-  if (hasContent(req.body)) return req.body;
+  if (hasContent(req.body)) {
+    console.log(`[body] using req.body (type=${typeof req.body}, isBuffer=${Buffer.isBuffer(req.body)})`);
+    if (Buffer.isBuffer(req.body)) {
+      console.log(`[body] Buffer content: ${req.body.toString("utf-8").slice(0, 500)}`);
+    } else if (typeof req.body === "string") {
+      console.log(`[body] String content: ${req.body.slice(0, 500)}`);
+    } else {
+      console.log(`[body] Object keys: ${JSON.stringify(Object.keys(req.body))}`);
+    }
+    return req.body;
+  }
 
-  if (!req.readable || req.readableEnded) return undefined;
+  if (!req.readable || req.readableEnded) {
+    console.log(`[body] no content: readable=${req.readable}, readableEnded=${req.readableEnded}`);
+    return undefined;
+  }
 
   try {
-    return await readStream(req);
+    const result = await readStream(req);
+    if (result) {
+      console.log(`[body] read from stream (${result.length} bytes): ${result.toString("utf-8").slice(0, 500)}`);
+    } else {
+      console.log(`[body] stream was empty`);
+    }
+    return result;
   } catch (error) {
     console.error(`Failed to read request body: ${error}`);
     throw error;
@@ -103,10 +122,19 @@ export const createRequestForwarder = ({ targetPort }) => {
       fetchBody = JSON.stringify(body);
     }
 
+    const forwardHeaders = prepareForwardHeaders(req.headers, fetchBody);
+    console.log(`[forward] ${req.method} ${url}`);
+    console.log(`[forward] body type=${typeof fetchBody}, isBuffer=${Buffer.isBuffer(fetchBody)}, length=${fetchBody?.length ?? "n/a"}`);
+    if (fetchBody !== undefined && fetchBody !== null) {
+      const preview = Buffer.isBuffer(fetchBody) ? fetchBody.toString("utf-8").slice(0, 500) : String(fetchBody).slice(0, 500);
+      console.log(`[forward] body content: ${preview}`);
+    }
+    console.log(`[forward] headers: ${JSON.stringify(forwardHeaders)}`);
+
     try {
       const response = await fetchWithRetry(url, {
         method: req.method,
-        headers: prepareForwardHeaders(req.headers, fetchBody),
+        headers: forwardHeaders,
         body: fetchBody,
       });
 
