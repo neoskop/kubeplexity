@@ -33,6 +33,7 @@ const loadAppVersion = async () => {
 await loadAppVersion();
 
 const app = express();
+app.use(express.raw({ type: "*/*" }));
 const port = 8080;
 
 console.log(`Starting kubeplexity v${appVersion}`);
