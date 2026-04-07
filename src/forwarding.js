@@ -106,7 +106,7 @@ export const createRequestForwarder = ({ targetPort }) => {
     try {
       const response = await fetchWithRetry(url, {
         method: req.method,
-        headers: prepareForwardHeaders(req.headers, body),
+        headers: prepareForwardHeaders(req.headers, fetchBody),
         body: fetchBody,
       });
 
