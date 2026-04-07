@@ -73,6 +73,9 @@ rules:
     resources: ["deployments", "statefulsets"]
     verbs: ["get"]
   - apiGroups: [""]
+    resources: ["services"]
+    verbs: ["get"]
+  - apiGroups: [""]
     resources: ["pods"]
     verbs: ["list"]
 ---

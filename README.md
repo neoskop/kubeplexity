@@ -1,6 +1,6 @@
 # kubeplexity
 
-Kubernetes request multiplexer -- forwards incoming HTTP requests to **all pods** of a target Deployment or StatefulSet in parallel.
+Kubernetes request multiplexer -- forwards incoming HTTP requests to **all pods** of a target Deployment, StatefulSet, or Service in parallel.
 
 Pod discovery uses the Kubernetes API directly (via `@kubernetes/client-node`), so no headless Service is needed.
 
@@ -8,7 +8,7 @@ Pod discovery uses the Kubernetes API directly (via `@kubernetes/client-node`), 
 
 | Environment variable | Required | Default | Description |
 | --- | --- | --- | --- |
-| `TARGET` | yes | -- | Target workload: `deployment/<name>[:<port>]` or `statefulset/<name>[:<port>]`. Port defaults to `80`. |
+| `TARGET` | yes | -- | Target workload: `deployment/<name>[:<port>]`, `statefulset/<name>[:<port>]`, or `service/<name>[:<port>]`. Port defaults to `80`. |
 | `NAMESPACE` | no | auto-detected | Kubernetes namespace. Auto-detected from the in-cluster service account when omitted. |
 | `DISCOVERY_INTERVAL_MS` | no | `5000` | How often (in ms) to re-query the Kubernetes API for pod addresses. |
 
@@ -18,6 +18,7 @@ Pod discovery uses the Kubernetes API directly (via `@kubernetes/client-node`), 
 TARGET=deployment/echo            # all pods of Deployment "echo", port 80
 TARGET=deployment/echo:8080       # all pods of Deployment "echo", port 8080
 TARGET=statefulset/redis:6379     # all pods of StatefulSet "redis", port 6379
+TARGET=service/my-service:8080    # all pods behind Service "my-service", port 8080
 ```
 
 ## RBAC
@@ -37,6 +38,9 @@ metadata:
 rules:
   - apiGroups: ["apps"]
     resources: ["deployments", "statefulsets"]
+    verbs: ["get"]
+  - apiGroups: [""]
+    resources: ["services"]
     verbs: ["get"]
   - apiGroups: [""]
     resources: ["pods"]

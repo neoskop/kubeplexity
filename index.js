@@ -45,13 +45,13 @@ const parseTarget = () => {
   }
 
   const match = target.match(
-    /^(deployment|statefulset)\/([^:]+?)(?::(\d+))?$/
+    /^(deployment|statefulset|service)\/([^:]+?)(?::(\d+))?$/
   );
 
   if (!match) {
     throw new Error(
       `Invalid TARGET format: "${target}". ` +
-        `Expected "deployment/<name>[:<port>]" or "statefulset/<name>[:<port>]". ` +
+        `Expected "deployment/<name>[:<port>]", "statefulset/<name>[:<port>]", or "service/<name>[:<port>]". ` +
         `Example: "deployment/echo:80"`
     );
   }

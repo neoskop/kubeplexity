@@ -13,12 +13,18 @@ export const createPodDiscovery = ({ appsApi, coreApi, config, cacheTtlMs = 5000
         namespace,
       });
       selector = deployment.spec?.selector?.matchLabels;
-    } else {
+    } else if (workloadKind === "statefulset") {
       const statefulSet = await appsApi.readNamespacedStatefulSet({
         name: workloadName,
         namespace,
       });
       selector = statefulSet.spec?.selector?.matchLabels;
+    } else {
+      const service = await coreApi.readNamespacedService({
+        name: workloadName,
+        namespace,
+      });
+      selector = service.spec?.selector;
     }
 
     if (!selector || Object.keys(selector).length === 0) {
