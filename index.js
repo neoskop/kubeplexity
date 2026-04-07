@@ -1,6 +1,6 @@
 import express from "express";
 import axios from "axios";
-import dns from "dns/promises";
+import * as k8s from "@kubernetes/client-node";
 import axiosRetry from "axios-retry";
 import { readFile } from "fs/promises";
 import path from "path";
@@ -59,30 +59,143 @@ const port = 8080;
 
 console.log(`Starting kubeplexity v${appVersion}`);
 
-const getTargetParts = () => {
+const parseTarget = () => {
   const target = process.env.TARGET;
 
   if (!target) {
     throw new Error("TARGET environment variable must be set");
   }
 
-  if (target.includes(":")) {
-    const parts = target.split(":");
-    return { targetHostname: parts[0], targetPort: parts[1] };
-  } else {
-    return { targetHostname: target, targetPort: 80 };
+  const match = target.match(
+    /^(deployment|statefulset)\/([^:]+?)(?::(\d+))?$/
+  );
+
+  if (!match) {
+    throw new Error(
+      `Invalid TARGET format: "${target}". ` +
+        `Expected "deployment/<name>[:<port>]" or "statefulset/<name>[:<port>]". ` +
+        `Example: "deployment/echo:80"`
+    );
   }
+
+  return {
+    workloadKind: match[1],
+    workloadName: match[2],
+    targetPort: match[3] ? parseInt(match[3], 10) : 80,
+  };
 };
 
-let targetHostname;
+let workloadKind;
+let workloadName;
 let targetPort;
 
 try {
-  ({ targetHostname, targetPort } = getTargetParts());
+  ({ workloadKind, workloadName, targetPort } = parseTarget());
 } catch (error) {
   console.error(`Invalid target configuration: ${error?.message ?? error}`);
   process.exit(1);
 }
+
+const kc = new k8s.KubeConfig();
+kc.loadFromDefault();
+
+const appsApi = kc.makeApiClient(k8s.AppsV1Api);
+const coreApi = kc.makeApiClient(k8s.CoreV1Api);
+
+const resolveNamespace = async () => {
+  if (process.env.NAMESPACE) {
+    return process.env.NAMESPACE;
+  }
+  try {
+    const ns = await readFile(
+      "/var/run/secrets/kubernetes.io/serviceaccount/namespace",
+      "utf-8"
+    );
+    return ns.trim();
+  } catch {
+    throw new Error(
+      "Unable to determine namespace. Set NAMESPACE env var or run in-cluster."
+    );
+  }
+};
+
+let namespace;
+
+try {
+  namespace = await resolveNamespace();
+} catch (error) {
+  console.error(error.message);
+  process.exit(1);
+}
+
+console.log(
+  `Targeting ${workloadKind}/${workloadName}:${targetPort} in namespace ${namespace}`
+);
+
+const discoverPodAddresses = async () => {
+  let selector;
+
+  if (workloadKind === "deployment") {
+    const deployment = await appsApi.readNamespacedDeployment({
+      name: workloadName,
+      namespace,
+    });
+    selector = deployment.spec?.selector?.matchLabels;
+  } else {
+    const statefulSet = await appsApi.readNamespacedStatefulSet({
+      name: workloadName,
+      namespace,
+    });
+    selector = statefulSet.spec?.selector?.matchLabels;
+  }
+
+  if (!selector || Object.keys(selector).length === 0) {
+    throw new Error(
+      `No matchLabels found on ${workloadKind}/${workloadName}`
+    );
+  }
+
+  const labelSelector = Object.entries(selector)
+    .map(([key, value]) => `${key}=${value}`)
+    .join(",");
+
+  const podList = await coreApi.listNamespacedPod({
+    namespace,
+    labelSelector,
+  });
+
+  const readyPods = podList.items.filter((pod) => {
+    if (pod.status?.phase !== "Running") return false;
+    if (!pod.status?.podIP) return false;
+
+    const readyCondition = pod.status?.conditions?.find(
+      (c) => c.type === "Ready"
+    );
+    return readyCondition?.status === "True";
+  });
+
+  return readyPods.map((pod) => ({
+    address: pod.status.podIP,
+    name: pod.metadata?.name,
+  }));
+};
+
+let cachedAddresses = null;
+let cacheExpiry = 0;
+const CACHE_TTL_MS = parseInt(
+  process.env.DISCOVERY_INTERVAL_MS ?? "5000",
+  10
+);
+
+const getAddresses = async () => {
+  const now = Date.now();
+  if (cachedAddresses && now < cacheExpiry) {
+    return cachedAddresses;
+  }
+  cachedAddresses = await discoverPodAddresses();
+  cacheExpiry = now + CACHE_TTL_MS;
+  return cachedAddresses;
+};
 
 const readRequestBody = async (req) => {
   const method = req.method?.toUpperCase?.() ?? "";
@@ -218,16 +331,20 @@ app.use(async (req, res) => {
   let addresses;
 
   try {
-    addresses = await dns.lookup(targetHostname, { family: 4, all: true });
+    addresses = await getAddresses();
   } catch (error) {
-    console.error(`Resolving of ${targetHostname} failed: ${error}`);
-    res.status(502).send("Failed to resolve target host");
+    console.error(
+      `Pod discovery for ${workloadKind}/${workloadName} failed: ${error}`
+    );
+    res.status(502).send("Failed to discover target pods");
     return;
   }
 
   if (!Array.isArray(addresses) || addresses.length === 0) {
-    console.error(`No IPv4 addresses found for ${targetHostname}`);
-    res.status(502).send("No targets resolved for host");
+    console.error(
+      `No ready pods found for ${workloadKind}/${workloadName} in namespace ${namespace}`
+    );
+    res.status(502).send("No ready pods found for target workload");
     return;
   }
 

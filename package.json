@@ -11,6 +11,7 @@
   "author": "",
   "license": "MIT",
   "dependencies": {
+    "@kubernetes/client-node": "^1.0.0",
     "axios": "1.13.6",
     "axios-retry": "4.5.0",
     "express": "5.2.1"

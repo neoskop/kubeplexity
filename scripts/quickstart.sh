@@ -60,6 +60,37 @@ docker push localhost:${reg_port}/kubeplexity:latest
 
 cat <<EOF | kubectl apply -f -
 apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: kubeplexity
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: kubeplexity
+rules:
+  - apiGroups: ["apps"]
+    resources: ["deployments", "statefulsets"]
+    verbs: ["get"]
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["list"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: kubeplexity
+subjects:
+  - kind: ServiceAccount
+    name: kubeplexity
+roleRef:
+  kind: Role
+  name: kubeplexity
+  apiGroup: rbac.authorization.k8s.io
+EOF
+
+cat <<EOF | kubectl apply -f -
+apiVersion: v1
 kind: Service
 metadata:
   name: kubeplexity
@@ -92,31 +123,17 @@ spec:
       labels:
         app: kubeplexity
     spec:
+      serviceAccountName: kubeplexity
       containers:
         - name: kubeplexity
           imagePullPolicy: Always
           image: localhost:${reg_port}/kubeplexity:latest
           env:
             - name: TARGET
-              value: echo
+              value: deployment/echo:80
           ports:
             - containerPort: 8080
               name: http
-EOF
-
-cat <<EOF | kubectl apply -f -
-apiVersion: v1
-kind: Service
-metadata:
-  name: echo
-spec:
-  clusterIP: None
-  selector:
-    app: echo
-  ports:
-    - protocol: TCP
-      port: 80
-      targetPort: 80
 EOF
 
 cat <<EOF | kubectl apply -f -
