@@ -9,7 +9,7 @@ const HOP_BY_HOP_HEADERS = [
   "upgrade",
 ];
 
-export const fetchWithRetry = async (url, options, { retries = 3, timeout = 10000 } = {}) => {
+const fetchWithRetry = async (url, options, { retries = 3, timeout = 10000 } = {}) => {
   for (let attempt = 0; attempt <= retries; attempt++) {
     try {
       const response = await fetch(url, {
@@ -41,50 +41,39 @@ export const fetchWithRetry = async (url, options, { retries = 3, timeout = 1000
   }
 };
 
+const hasContent = (body) => {
+  if (body === undefined || body === null) return false;
+  if (Buffer.isBuffer(body)) return true;
+  if (typeof body === "string") return body.length > 0;
+  if (typeof body === "object") return Object.keys(body).length > 0;
+  return false;
+};
+
+const readStream = async (req) => {
+  const chunks = [];
+  for await (const chunk of req) {
+    chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+  }
+  return chunks.length > 0 ? Buffer.concat(chunks) : undefined;
+};
+
 export const readRequestBody = async (req) => {
   const method = req.method?.toUpperCase?.() ?? "";
+  if (method === "GET" || method === "HEAD") return undefined;
 
-  if (method === "GET" || method === "HEAD") {
-    return undefined;
-  }
+  if (hasContent(req.body)) return req.body;
 
-  if (req.body !== undefined && req.body !== null) {
-    if (Buffer.isBuffer(req.body)) {
-      return req.body;
-    }
-
-    if (typeof req.body === "string" && req.body.length > 0) {
-      return req.body;
-    }
-
-    if (typeof req.body === "object" && Object.keys(req.body).length > 0) {
-      return req.body;
-    }
-  }
-
-  if (!req.readable || req.readableEnded) {
-    return undefined;
-  }
-
-  const chunks = [];
+  if (!req.readable || req.readableEnded) return undefined;
 
   try {
-    for await (const chunk of req) {
-      chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
-    }
+    return await readStream(req);
   } catch (error) {
     console.error(`Failed to read request body: ${error}`);
     throw error;
   }
-
-  if (chunks.length === 0) {
-    return undefined;
-  }
-
-  return Buffer.concat(chunks);
 };
 
-export const prepareForwardHeaders = (headers, body) => {
+const prepareForwardHeaders = (headers, body) => {
   const forwardHeaders = { ...headers };
 
   for (const header of HOP_BY_HOP_HEADERS) {
