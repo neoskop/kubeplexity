@@ -1,7 +1,5 @@
 import express from "express";
-import axios from "axios";
 import * as k8s from "@kubernetes/client-node";
-import axiosRetry from "axios-retry";
 import { readFile } from "fs/promises";
 import path from "path";
 import { fileURLToPath } from "url";
@@ -31,28 +29,37 @@ const loadAppVersion = async () => {
 
 await loadAppVersion();
 
-const axiosClient = axios.create({
-  timeout: 10000,
-});
+const fetchWithRetry = async (url, options, { retries = 3, timeout = 10000 } = {}) => {
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    try {
+      const response = await fetch(url, {
+        ...options,
+        signal: AbortSignal.timeout(timeout),
+      });
 
-axiosRetry(axiosClient, {
-  retries: 3,
-  retryDelay: axiosRetry.exponentialDelay,
-  retryCondition: (error) => {
-    if (error?.response?.status === 408) {
-      return true;
-    }
+      if (response.status === 408 && attempt < retries) {
+        const delay = Math.pow(2, attempt + 1) * 100 + Math.random() * 100;
+        console.log(`Retrying request to ${url} (attempt ${attempt + 1})`);
+        console.log(`Retry triggered by error: Request Timeout (408)`);
+        await new Promise((resolve) => setTimeout(resolve, delay));
+        continue;
+      }
 
-    return axiosRetry.isNetworkOrIdempotentRequestError(error);
-  },
-  onRetry: (retryCount, error, requestConfig) => {
-    const url = requestConfig?.url ?? "unknown";
-    console.log(`Retrying request to ${url} (attempt ${retryCount})`);
-    if (error?.message) {
-      console.log(`Retry triggered by error: ${error.message}`);
+      return response;
+    } catch (error) {
+      if (attempt < retries) {
+        const delay = Math.pow(2, attempt + 1) * 100 + Math.random() * 100;
+        console.log(`Retrying request to ${url} (attempt ${attempt + 1})`);
+        if (error?.message) {
+          console.log(`Retry triggered by error: ${error.message}`);
+        }
+        await new Promise((resolve) => setTimeout(resolve, delay));
+        continue;
+      }
+      throw error;
     }
-  },
-});
+  }
+};
 
 const app = express();
 const port = 8080;
@@ -275,12 +282,16 @@ const forwardRequestToAddress = async (req, address, body) => {
   const url = `http://${address.address}:${targetPort}${req.url}`;
   console.log(`Forwarding request to ${url}`);
 
+  let fetchBody = body;
+  if (body !== undefined && body !== null && typeof body === "object" && !Buffer.isBuffer(body)) {
+    fetchBody = JSON.stringify(body);
+  }
+
   try {
-    const response = await axiosClient.request({
+    const response = await fetchWithRetry(url, {
       method: req.method,
-      url,
       headers: prepareForwardHeaders(req.headers, body),
-      data: body,
+      body: fetchBody,
     });
 
     if (response.status < 200 || response.status >= 400) {
@@ -296,19 +307,6 @@ const forwardRequestToAddress = async (req, address, body) => {
       success: response.status >= 200 && response.status < 400,
     };
   } catch (error) {
-    if (error?.response?.status) {
-      console.error(
-        `Error forwarding request to ${url}: received status ${error.response.status}`
-      );
-      return {
-        url,
-        address: address.address,
-        status: error.response.status,
-        success: false,
-        error: `Received status ${error.response.status}`,
-      };
-    }
-
     console.error(`Error forwarding request to ${url}: ${error}`);
     return {
       url,
