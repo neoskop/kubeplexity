@@ -1,10 +1,10 @@
 import express from "express";
-import * as k8s from "@kubernetes/client-node";
 import { readFile } from "fs/promises";
 import path from "path";
 import { fileURLToPath } from "url";
 import pc from "picocolors";
 
+import { loadConfig, createAppsV1Api, createCoreV1Api } from "./src/kube.js";
 import { createPodDiscovery } from "./src/discovery.js";
 import { createRequestForwarder, readRequestBody } from "./src/forwarding.js";
 import { log, formatJson } from "./src/logger.js";
@@ -75,11 +75,9 @@ try {
   process.exit(1);
 }
 
-const kc = new k8s.KubeConfig();
-kc.loadFromDefault();
-
-const appsApi = kc.makeApiClient(k8s.AppsV1Api);
-const coreApi = kc.makeApiClient(k8s.CoreV1Api);
+const kubeConfig = await loadConfig();
+const appsApi = createAppsV1Api(kubeConfig);
+const coreApi = createCoreV1Api(kubeConfig);
 
 const resolveNamespace = async () => {
   if (process.env.NAMESPACE) {

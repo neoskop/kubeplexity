@@ -11,8 +11,8 @@
   "author": "",
   "license": "MIT",
   "dependencies": {
-    "@kubernetes/client-node": "^1.0.0",
     "express": "5.2.1",
+    "js-yaml": "4.1.0",
     "picocolors": "1.1.1"
   }
 }
