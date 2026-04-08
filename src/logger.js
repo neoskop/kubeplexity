@@ -10,7 +10,7 @@ function hashString(str) {
   return Math.abs(hash);
 }
 
-export function colorPodName(name) {
+function colorPodName(name) {
   if (!name) return pc.dim("unknown");
   const colorFn = POD_COLORS[hashString(name) % POD_COLORS.length];
   return colorFn(name);

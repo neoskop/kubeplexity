@@ -97,26 +97,32 @@ const prepareForwardHeaders = (headers, body) => {
   return forwardHeaders;
 };
 
+const serializeBody = (body) => {
+  if (body !== undefined && body !== null && typeof body === "object" && !Buffer.isBuffer(body)) {
+    return JSON.stringify(body);
+  }
+  return body;
+};
+
+const logDebugRequest = (headers, body) => {
+  if (!process.env.DEBUG) return;
+  log.info(`  headers: ${formatJson(headers)}`);
+  if (body !== undefined && body !== null) {
+    const bodyStr = Buffer.isBuffer(body) ? body.toString("utf-8") : String(body);
+    log.info(`  body: ${formatJson(bodyStr)}`);
+  }
+};
+
 export const createRequestForwarder = ({ targetPort }) => {
   return async (req, address, body) => {
     const url = `http://${address.address}:${targetPort}${req.url}`;
 
     log.info(`FWD ${pc.bold(req.method)} ${req.url} -> ${formatAddress(address)}`);
 
-    let fetchBody = body;
-    if (body !== undefined && body !== null && typeof body === "object" && !Buffer.isBuffer(body)) {
-      fetchBody = JSON.stringify(body);
-    }
-
+    const fetchBody = serializeBody(body);
     const forwardHeaders = prepareForwardHeaders(req.headers, fetchBody);
 
-    if (process.env.DEBUG) {
-      log.info(`  headers: ${formatJson(forwardHeaders)}`);
-      if (fetchBody !== undefined && fetchBody !== null) {
-        const bodyStr = Buffer.isBuffer(fetchBody) ? fetchBody.toString("utf-8") : String(fetchBody);
-        log.info(`  body: ${formatJson(bodyStr)}`);
-      }
-    }
+    logDebugRequest(forwardHeaders, fetchBody);
 
     try {
       const response = await fetchWithRetry(url, {
