@@ -1,3 +1,6 @@
+import pc from "picocolors";
+import { log, formatAddress, formatJson } from "./logger.js";
+
 const HOP_BY_HOP_HEADERS = [
   "connection",
   "keep-alive",
@@ -9,7 +12,7 @@ const HOP_BY_HOP_HEADERS = [
   "upgrade",
 ];
 
-const fetchWithRetry = async (url, options, { retries = 3, timeout = 10000 } = {}) => {
+const fetchWithRetry = async (url, options, address, { retries = 3, timeout = 10000 } = {}) => {
   for (let attempt = 0; attempt <= retries; attempt++) {
     try {
       const response = await fetch(url, {
@@ -19,8 +22,7 @@ const fetchWithRetry = async (url, options, { retries = 3, timeout = 10000 } = {
 
       if (response.status === 408 && attempt < retries) {
         const delay = Math.pow(2, attempt + 1) * 100 + Math.random() * 100;
-        console.log(`Retrying request to ${url} (attempt ${attempt + 1})`);
-        console.log(`Retry triggered by error: Request Timeout (408)`);
+        log.warn(`RETRY ${formatAddress(address)} attempt ${attempt + 1}/${retries} -- Request Timeout (408)`);
         await new Promise((resolve) => setTimeout(resolve, delay));
         continue;
       }
@@ -29,10 +31,8 @@ const fetchWithRetry = async (url, options, { retries = 3, timeout = 10000 } = {
     } catch (error) {
       if (attempt < retries) {
         const delay = Math.pow(2, attempt + 1) * 100 + Math.random() * 100;
-        console.log(`Retrying request to ${url} (attempt ${attempt + 1})`);
-        if (error?.message) {
-          console.log(`Retry triggered by error: ${error.message}`);
-        }
+        const reason = error?.message ?? String(error);
+        log.warn(`RETRY ${formatAddress(address)} attempt ${attempt + 1}/${retries} -- ${reason}`);
         await new Promise((resolve) => setTimeout(resolve, delay));
         continue;
       }
@@ -62,32 +62,17 @@ export const readRequestBody = async (req) => {
   if (method === "GET" || method === "HEAD") return undefined;
 
   if (hasContent(req.body)) {
-    console.log(`[body] using req.body (type=${typeof req.body}, isBuffer=${Buffer.isBuffer(req.body)})`);
-    if (Buffer.isBuffer(req.body)) {
-      console.log(`[body] Buffer content: ${req.body.toString("utf-8").slice(0, 500)}`);
-    } else if (typeof req.body === "string") {
-      console.log(`[body] String content: ${req.body.slice(0, 500)}`);
-    } else {
-      console.log(`[body] Object keys: ${JSON.stringify(Object.keys(req.body))}`);
-    }
     return req.body;
   }
 
   if (!req.readable || req.readableEnded) {
-    console.log(`[body] no content: readable=${req.readable}, readableEnded=${req.readableEnded}`);
     return undefined;
   }
 
   try {
-    const result = await readStream(req);
-    if (result) {
-      console.log(`[body] read from stream (${result.length} bytes): ${result.toString("utf-8").slice(0, 500)}`);
-    } else {
-      console.log(`[body] stream was empty`);
-    }
-    return result;
+    return await readStream(req);
   } catch (error) {
-    console.error(`Failed to read request body: ${error}`);
+    log.error(`Failed to read request body: ${error}`);
     throw error;
   }
 };
@@ -115,7 +100,8 @@ const prepareForwardHeaders = (headers, body) => {
 export const createRequestForwarder = ({ targetPort }) => {
   return async (req, address, body) => {
     const url = `http://${address.address}:${targetPort}${req.url}`;
-    console.log(`Forwarding request to ${url}`);
+
+    log.info(`FWD ${pc.bold(req.method)} ${req.url} -> ${formatAddress(address)}`);
 
     let fetchBody = body;
     if (body !== undefined && body !== null && typeof body === "object" && !Buffer.isBuffer(body)) {
@@ -123,25 +109,26 @@ export const createRequestForwarder = ({ targetPort }) => {
     }
 
     const forwardHeaders = prepareForwardHeaders(req.headers, fetchBody);
-    console.log(`[forward] ${req.method} ${url}`);
-    console.log(`[forward] body type=${typeof fetchBody}, isBuffer=${Buffer.isBuffer(fetchBody)}, length=${fetchBody?.length ?? "n/a"}`);
-    if (fetchBody !== undefined && fetchBody !== null) {
-      const preview = Buffer.isBuffer(fetchBody) ? fetchBody.toString("utf-8").slice(0, 500) : String(fetchBody).slice(0, 500);
-      console.log(`[forward] body content: ${preview}`);
+
+    if (process.env.DEBUG) {
+      log.info(`  headers: ${formatJson(forwardHeaders)}`);
+      if (fetchBody !== undefined && fetchBody !== null) {
+        const bodyStr = Buffer.isBuffer(fetchBody) ? fetchBody.toString("utf-8") : String(fetchBody);
+        log.info(`  body: ${formatJson(bodyStr)}`);
+      }
     }
-    console.log(`[forward] headers: ${JSON.stringify(forwardHeaders)}`);
 
     try {
       const response = await fetchWithRetry(url, {
         method: req.method,
         headers: forwardHeaders,
         body: fetchBody,
-      });
+      }, address);
 
-      if (response.status < 200 || response.status >= 400) {
-        console.warn(
-          `Received status code ${response.status} when forwarding request to ${url}`
-        );
+      if (response.status >= 200 && response.status < 400) {
+        log.info(` OK ${pc.bold(req.method)} ${req.url} -> ${formatAddress(address)} ${pc.green(response.status)}`);
+      } else {
+        log.warn(`ERR ${pc.bold(req.method)} ${req.url} -> ${formatAddress(address)} ${pc.red(response.status)}`);
       }
 
       return {
@@ -151,7 +138,7 @@ export const createRequestForwarder = ({ targetPort }) => {
         success: response.status >= 200 && response.status < 400,
       };
     } catch (error) {
-      console.error(`Error forwarding request to ${url}: ${error}`);
+      log.error(`FAIL ${pc.bold(req.method)} ${req.url} -> ${formatAddress(address)}: ${error?.message ?? error}`);
       return {
         url,
         address: address.address,

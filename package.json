@@ -12,6 +12,7 @@
   "license": "MIT",
   "dependencies": {
     "@kubernetes/client-node": "^1.0.0",
-    "express": "5.2.1"
+    "express": "5.2.1",
+    "picocolors": "1.1.1"
   }
 }

@@ -3,9 +3,11 @@ import * as k8s from "@kubernetes/client-node";
 import { readFile } from "fs/promises";
 import path from "path";
 import { fileURLToPath } from "url";
+import pc from "picocolors";
 
 import { createPodDiscovery } from "./src/discovery.js";
 import { createRequestForwarder, readRequestBody } from "./src/forwarding.js";
+import { log, formatJson } from "./src/logger.js";
 
 const resolvePackageJsonPath = () => {
   const currentFilePath = fileURLToPath(import.meta.url);
@@ -24,9 +26,7 @@ const loadAppVersion = async () => {
       appVersion = parsed.version;
     }
   } catch (error) {
-    console.warn(
-      `Failed to read package.json for version information: ${error?.message ?? error}`
-    );
+    log.warn(`Failed to read package.json: ${error?.message ?? error}`);
   }
 };
 
@@ -36,7 +36,7 @@ const app = express();
 app.use(express.raw({ type: "*/*" }));
 const port = 8080;
 
-console.log(`Starting kubeplexity v${appVersion}`);
+log.info(`${pc.bold("kubeplexity")} ${pc.dim("v" + appVersion)}`);
 
 const parseTarget = () => {
   const target = process.env.TARGET;
@@ -71,7 +71,7 @@ let targetPort;
 try {
   ({ workloadKind, workloadName, targetPort } = parseTarget());
 } catch (error) {
-  console.error(`Invalid target configuration: ${error?.message ?? error}`);
+  log.error(`Invalid target configuration: ${error?.message ?? error}`);
   process.exit(1);
 }
 
@@ -103,13 +103,11 @@ let namespace;
 try {
   namespace = await resolveNamespace();
 } catch (error) {
-  console.error(error.message);
+  log.error(error.message);
   process.exit(1);
 }
 
-console.log(
-  `Targeting ${workloadKind}/${workloadName}:${targetPort} in namespace ${namespace}`
-);
+log.info(`Target: ${pc.bold(workloadKind + "/" + workloadName + ":" + targetPort)} in ${pc.cyan(namespace)}`);
 
 const getAddresses = createPodDiscovery({
   appsApi,
@@ -134,17 +132,13 @@ app.use(async (req, res) => {
   try {
     addresses = await getAddresses();
   } catch (error) {
-    console.error(
-      `Pod discovery for ${workloadKind}/${workloadName} failed: ${error}`
-    );
+    log.error(`Pod discovery failed for ${pc.bold(workloadKind + "/" + workloadName)}: ${error}`);
     res.status(502).send("Failed to discover target pods");
     return;
   }
 
   if (!Array.isArray(addresses) || addresses.length === 0) {
-    console.error(
-      `No ready pods found for ${workloadKind}/${workloadName} in namespace ${namespace}`
-    );
+    log.error(`No ready pods for ${pc.bold(workloadKind + "/" + workloadName)} in ${pc.cyan(namespace)}`);
     res.status(502).send("No ready pods found for target workload");
     return;
   }
@@ -166,26 +160,20 @@ app.use(async (req, res) => {
   const failures = results.filter((result) => !result.success);
 
   if (successes.length === 0) {
-    console.error(
-      `Failed to forward ${req.method} ${req.url} to any resolved target. Failures: ${JSON.stringify(
-        failures
-      )}`
-    );
+    log.error(`All forwards failed for ${pc.bold(req.method)} ${req.url}`);
+    log.error(formatJson(failures));
     res.status(502).send("Failed to forward request to any resolved target");
     return;
   }
 
   if (failures.length > 0) {
-    console.warn(
-      `Completed ${req.method} ${req.url} with partial failures: ${JSON.stringify(
-        failures
-      )}`
-    );
+    log.warn(`Partial failures for ${pc.bold(req.method)} ${req.url}`);
+    log.warn(formatJson(failures));
   }
 
   res.send("Ok");
 });
 
 app.listen(port, () => {
-  console.log(`Listening on port ${port}`);
+  log.info(`Listening on port ${pc.bold(port)}`);
 });
