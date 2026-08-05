@@ -1,4 +1,4 @@
-FROM node:24.19.0-bookworm@sha256:eb37f58646a901dc7727cf448cae36daaefaba79de33b5058dab79aa4c04aefb AS base
+FROM node:24.19.0-bookworm@sha256:934240a162082fd8b8a2f90cd5114446443f1eba1c5378f6687167ca405e6584 AS base
 USER node
 WORKDIR /home/node/app
 COPY package*.json ./
